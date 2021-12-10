@@ -46,19 +46,31 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Sarah Zimmerle, syz234
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+I am using the Bechdel dataset from the 'fivethirtyeight' library. My categorical variable is the Bechdel test (test). My numeric variables are the budget for the movies in dollars (budget), gross profits from the movie domestically (domgross),  gross profits from the movie internationally (intgross), and net return after taking costs and budget out for international profits and domestic profits (int_aftercosts and dom_aftercosts). My binary variable is if the movie passed or failed the Bechdel test (final_result). I researched what the Bechdel test was and it turns out that it's a test to measure Hollywood's gender bias originally promoted by Alison Bechdel. A movie needs to meet all three criteria in order to pass the Bechdel test. The first criteria is that the movie needs to have at least two women. The second criteria is that the women talk to each other. The third criteria is that the women talk to each other about something other than men. I am interested in seeing if movies that I've watched display gender bias according to the Bechdel test, and if there is appropriate female representation in movies that I've watched. I am also intrigued to see if the net profit made after costs differs between movies that passed the Bechdel test and failed the Bechdel test. There are 1794 observations (9 columns) in the dataset. In the categorical variable 'test', there were 141 movies with no women (nowomen), 514 movies with at least 2 women but never talked to each other (notalk), 194 movies with at least 2 women who talked to each other but about a man (men), 142 movies that met all three criteria but were considered 'on-the-line' and got neither a pass or fail (dubious), and 803 movies that met all three criteria and passed (ok). For the binary variable 'final_result', 991 failed and 803 passed the Bechdel test. 
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
+library(dplyr)
+library(fivethirtyeight)
+data(bechdel)
 
-# if your dataset needs tidying, do so here
+bechdel <- bechdel %>% select(-2, -4, -10, -11, -12, -13, -14, -15)
+bechdel <- bechdel %>% rename(final_result = binary)
+bechdel <- bechdel %>% rename(test = clean_test)
 
-# any other code here
+bechdel <- bechdel %>%
+  mutate(net_int_aftercosts = (intgross - budget),
+         net_dom_aftercosts = (domgross - budget))
+
+glimpse(bechdel)
+bechdel %>% summarise_all(n_distinct)
+
+bechdel %>% count(test)
+bechdel %>% count(final_result)
 ```
 
 ### Cluster Analysis
@@ -66,72 +78,297 @@ library(tidyverse)
 ```{R}
 library(cluster)
 # clustering code here
+bechdel1 <- na.omit(bechdel) 
+
+#sillhouette
+
+silwidth <- vector()
+for (i in 2:10) {
+    money <- bechdel1 %>% select("budget", "domgross", "intgross", 
+        "net_dom_aftercosts", "net_int_aftercosts") %>% 
+        scale %>% pam(k = i)
+    silwidth[i] <- money$silinfo$avg.width
+}
+
+ggplot() + geom_point(aes(x = 2:10, y = silwidth[2:10]))
+
+
+pam1 <- bechdel1 %>% select("budget", "domgross", "intgross", 
+        "net_dom_aftercosts", "net_int_aftercosts") %>% 
+        scale %>% pam(k = 3)
+pam1
+
+plot(pam1, which = 2)
+
+library(GGally)
+bechdel1 %>% mutate(cluster = as.factor(pam1$clustering)) %>% ggpairs(columns = c("budget", 
+    "domgross", "intgross", "net_dom_aftercosts", "net_int_aftercosts"), aes(color = cluster, 
+    alpha = 0.5))
+
+pamclust1 <- bechdel1 %>% mutate(cluster = as.factor(pam1$clustering))
+pamclust1 %>% group_by(cluster) %>% summarize_if(is.numeric, 
+    mean, na.rm = T)
+
+bechdel1 %>% slice(pam1$id.med)
+
 ```
 
-Discussion of clustering here
+The plot for silwidth shows that k should be equal to 2, but decided to go with k=3 as it fit better with my dataset. The ggpairs plot shows that when budget is high, net_dom_aftercosts is low. The other variables varied in separation by cluster.
+
+Cluster 1, Cluster, 2, and Cluster 3 are easily separable by the numeric variables. Cluster 1 is characterized by low budget, domgross, intgross, net_dom_aftercosts, and net_int_aftercosts. For Cluster 1, the women in the film ‘The Invention of Lying’ only talked about men, failed the Bechdel test, and was made in the year 2009.  Cluster 2 is characterized by average budget, domgross, intgross, net_dom_aftercosts, and net_int_aftercosts. For Cluster 2, the women never talked to each other, failed the Bechdel test, and was made in the year 1999. Cluster 3 is characterized high budget, domgross, intgross, net_dom_aftercosts, and net_int_aftercosts. For Cluster 3, the women didn’t talk to each other, failed the Bechdel test, and was made in the year 2009. With an average silhouette width of 0.39, it is evident that the observations are not clustering well with a k value of 3 and the structure is relatively weak. 
     
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+plot(pam1, which = 1)
+
+library(tidyverse)
+
+trying<- bechdel1 %>% select(-test)
+
+trying1 <- bechdel1 %>%
+      mutate(final_result = ifelse(final_result == "FAIL",0,1))
+glimpse(trying1)
+
+trying1 <- trying1 %>% select(-year, -test)
+
+bechdel_nums <- trying1 %>%
+    select_if(is.numeric) %>%
+    scale
+
+bechdel_pca <- princomp(bechdel_nums)
+names(bechdel_pca)
+
+summary(bechdel_pca, loadings = T)
+
+
+#determining how many PCs to keep
+eigval <- bechdel_pca$sdev^2 
+varprop = round(eigval/sum(eigval), 2)  
+
+ggplot() + geom_bar(aes(y = varprop, x = 1:6), stat = "identity") + 
+    xlab("") + geom_path(aes(y = varprop, x = 1:6)) + geom_text(aes(x = 1:6, 
+    y = varprop, label = round(varprop, 2)), vjust = 1, col = "white", 
+    size = 5) + scale_y_continuous(breaks = seq(0, 0.6, 0.2), 
+    labels = scales::percent) + scale_x_continuous(breaks = 1:10)
+
+#Keeping PC1 and PC2 & plotting them
+
+bech_df <-  data.frame(PC1=bechdel_pca$scores[, 1], PC2=bechdel_pca$scores[, 2])
+bech_df %>% mutate(final_result = trying$final_result) -> bech_df
+ggplot(bech_df, aes(PC1, PC2)) + geom_point(aes(color = final_result))
+
+
+
+#plotting biplot
+library(factoextra)
+fviz_pca_biplot(bechdel_pca)
+
+
+
 ```
 
-Discussions of PCA here. 
+My data’s standard deviations were converted to eig values, and I graphed the proportion of variation explained by each principle component. The second graph showed that PC1 accounted for 65% variation, PC2 accounted for 18% of the variation. It’s hard to tell from the biplot, but it appears that final_results of the bechdel test isn’t too correlated with revenue (numeric variables). 
+
+
+To describe PCA: PC 1, 2, & 3 show 94% of total variance. In PC 1, we can observe through column 1 (Comp.1) that it represents movies failing the Bechdel test and there was low numeric variables. In PC2, we can observe through column 2 (Comp.2) that it represents a higher scoring Bechdel test along with low budget and high net_dom_aftercosts. In PC3, we can observe through column 3 (Comp.3) that it represents movies who scored a little worse than PC2, but still passed the Bechdel test; the movies had a higher budget, higher intgross, but slightly lower net_dom_aftercosts. 
+
+I plotted PC1 and PC2 against each other. Based on the graph, there appears to be a positive correlation between PC1 and the numeric variables. Higher values of the final_result of the Bechdel test, indicated by the lighter blue, fall on the upper rightmost side of the graph representing higher values of PC1. Lower values of final_result, indicated by the darker blue, fall on the lower rightmost side of the graph, representing lower values of PC1. Higher values of the final_result fall on the upper side of the graph, representing higher values of PC2. Lower values of the final_result fall on the lower side of the graph, representing lower values. 
 
 ###  Linear Classifier
 
 ```{R}
 # linear classifier code here
+
+trying <- bechdel1 %>%
+      mutate(final_result = ifelse(final_result == "FAIL",0,1))
+
+fit <- glm(final_result ~ budget + intgross + domgross + net_int_aftercosts + net_dom_aftercosts, data = trying, family = "binomial")
+
+summary(fit)
+
+score <- predict(fit, type="response")
+score %>% round(3)
+
+class_diag(score,truth = trying$final_result, positive = 1)
+
+###
+
+summary(fit$fitted.values)
+
+hist(fit$fitted.values,main = " Histogram ",xlab = "Probability of 'pass'", col = 'light green')
+
+fit$aic
+
+trying$Predict <- ifelse(fit$fitted.values >0.5,"fail","pass")
+
+mytable <- table(trying$final_result,trying$Predict)
+rownames(mytable) <- c("Obs. pass","Obs. fail")
+colnames(mytable) <- c("Pred. pass","Pred. fail")
+mytable
+
+efficiency <- sum(diag(mytable))/sum(mytable)
+efficiency
+
+probability <- predict(fit, type = "response")
+table(truth = trying$final_result, prediction = as.numeric(probability>0.5)) %>% addmargins
+
+
 ```
+
+The variable final_result (pass/fail Bechdel test) was predicted with 55.71% accuracy, 27.08% sensitivity (proportion of actual passes being correctly identified), 78.84% specificity (proportion of actual fails being correctly identified), 50.83% positive predictive value (proportion of cases predicted passing that are actually passing), an F1 score of 35.33% (summarizing how well classification is), and an AUC of 58.53%. The in-sample testing here was pretty poor, indicating that the model is not really reliable in predicting new observations per CV AUC. The histogram shows a distribution of predicted probability of 'pass' for a movie in a Bechdel test. 
+
 
 ```{R}
 # cross-validation of linear classifier here
+
+set.seed(1234)
+k=10 #choose number of folds
+
+data<-trying[sample(nrow(trying)),] #randomly order rows
+folds<-cut(seq(1:nrow(trying)),breaks=k,labels=F) #create folds
+
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$final_result ## Truth labels for fold i
+  
+  ## Train model on training set (all but fold i)
+  fit <- glm(final_result ~ budget + intgross + domgross + net_int_aftercosts + net_dom_aftercosts, data = trying, family = "binomial")
+  
+  ## Test model on test set (fold i) 
+  probs<-predict(fit,newdata = test,type="response")
+  
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+
+summarize_all(diags,mean)
+
 ```
 
-Discussion here
+The level of fit shown by the results is relatively poor. With all low values across the board, it appears that there are signs of overfitting. 
+
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
+
 # non-parametric classifier code here
+
+fit <- knn3(final_result ~. , data=trying)
+probs <- predict(fit, newdata=trying)[,2]
+class_diag(probs, trying$final_result, positive="1") 
+
+table(truth = trying$final_result, prediction = (probability > .5)) %>% addmargins()
+
 ```
+
+With the non-parametric test not assuming anything about the underlying conditions (e.g. mean, sd) the output values consisted of overall improvement. The variable final_result (pass/fail Bechdel test) was predicted with 71.36% accuracy, 63.96% sensitivity (proportion of actual passes being correctly identified), 77.30% specificity (proportion of actual fails being correctly identified), 69.37% positive predictive value (proportion of cases predicted passing that are actually passing), an F1 score of 66.52% (summarizing how well classification is), and an AUC of 77.60%. The out-of-sample testing here showed great improvement, indicating that this model slightly more reliable in predicting new observations per CV AUC. The histogram shows a distribution of predicted probability of 'pass' for a movie in a Bechdel test. 
+
 
 ```{R}
 # cross-validation of np classifier here
+set.seed(1234)
+k=10 #choose number of folds
+
+data<-trying[sample(nrow(trying)),] #randomly order rows
+folds<-cut(seq(1:nrow(trying)),breaks=k,labels=F) #create 10 folds
+
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$final_result
+  
+  ## Train model on training set
+  fit1 <- knn3(final_result ~ budget + intgross + domgross + net_int_aftercosts + net_dom_aftercosts, data = trying)
+  probs<-predict(fit1,newdata = test)[,2]
+  
+  ## Test model on test set (save all k results)
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+
+summarize_all(diags,mean)
+
 ```
 
-Discussion
+
+The level of fit shown by the results is average-good. With higher values across the board, it appears that there are minimal signs of overfitting. 
+
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
 # regression model code here
+fit<-lm(net_dom_aftercosts ~ domgross + budget, data=trying) #predict mpg from all other variables
+yhat<-predict(fit) #predicted mpg
+
+mean((trying$net_dom_aftercosts-yhat)^2)
+
 ```
 
 ```{R}
 # cross-validation of regression model here
+
+set.seed(1234)
+k=5 #choose number of folds
+data<-trying[sample(nrow(trying)),] #randomly order rows
+folds<-cut(seq(1:nrow(trying)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+train<-data[folds!=i,]
+test<-data[folds==i,]
+## Fit linear regression model to training set
+fit<-lm(net_dom_aftercosts ~ domgross + budget, data=train)
+## Get predictions/y-hats on test set (fold i)
+yhat<-predict(fit,newdata=test)
+## Compute prediction error (MSE) for fold i
+diags<-mean((test$net_dom_aftercosts-yhat)^2)
+}
+mean(diags) 
 ```
 
-Discussion
+The MSE, or the measure of prediction error, in the regression model is 4.777801e-14 which is an excellent value, since it is low. Domgross and budget accurately predict net_dom_aftercosts, which is to be expected. After cross validation, the MSE is even lower with a value of 5.324899e-14 which is also a great value. Due to the value output, this model shows no signs of overfitting. 
 
 ### Python 
 
 ```{R}
 library(reticulate)
+use_python("/usr/bin/python3", required = F)
+hi<-"Hook"
+
+cat(c(hi,py$hi)) 
 ```
 
 ```{python}
 # python code here
+
+hi = "em"
+
+print(r.hi,hi)
+
 ```
 
 Discussion
 
-### Concluding Remarks
+In the R chunk, we assign "Hook" to hi. In the python chunk above, we can assign "em" to hi. 
 
-Include concluding remarks here, if any
+
+You can assign things in both environments, and each would not override the other. We can use the print function in the Python chunk to take 'hi' from the R environment. Further explaining, we can pull anything from the R environment by putting the item after "r.". This code is going to print up "Hook em" because we defined the first hi as "Hello" in the R environment (this is what we're pulling from the R environment in the python chunk), and then the second hi is defined as "world" in the python chunk. In other words, with r. is coded in the python chunk in order to access R-defined objects in the R environment.
+
+Again, we assigned "Hook" to hi in the R chunk, and "world" to hi in the Python chunk. We can code py$ 
+in the R chunk this time in order to access Python-defined obejcts in Python. The item that comes after py$ is the item that we pull from the 
+Python environment. 
+
+
+
 
 
 
